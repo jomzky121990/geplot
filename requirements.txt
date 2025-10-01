@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+pyproj
+folium
+streamlit-folium
+reportlab
+ezdxf
+pyshp
+simplekml
+scipy
+matplotlib

@@ -1,0 +1,7 @@
+{
+  "enable_curves": false,
+  "db_base": "GEPlotDB\\lots",
+  "auto_save_db": true,
+  "attr_lot_type": "FP",
+  "google_api_key": ""
+}

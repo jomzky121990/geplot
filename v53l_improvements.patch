@@ -1,0 +1,148 @@
+*** Begin Patch
+*** Update File: GE_Plot_v53l.py
+@@
+-    with c2:
+-        st.subheader("Lines (Bearing & Distance)")
+-        st.caption("Format: N dd-mm ([--ss]) E")
+-        default_lines = pd.DataFrame([
+-            {"Bearing":"N 57-59 W","Distance":4631.98},
+-            {"Bearing":"S 79-46 E","Distance":20.77},
+-            {"Bearing":"S 08-44 W","Distance":79.67},
+-            {"Bearing":"N 80-14 W","Distance":97.64},
+-            {"Bearing":"N 06-47 E","Distance":80.78},
+-            {"Bearing":"S 79-35 E","Distance":29.93},
+-            {"Bearing":"S 79-40 E","Distance":49.71},
+-        ])
+-        lines_value = st.data_editor(default_lines, num_rows="dynamic", use_container_width=True, key="lines_tbl")
++    with c2:
++        st.subheader("Lines (Bearing & Distance)")
++        st.caption("Format: N dd-mm ([-ss]) E")
++        _default_lines = pd.DataFrame([
++            {"Bearing":"N 57-59 W","Distance":4631.98},
++            {"Bearing":"S 79-46 E","Distance":20.77},
++            {"Bearing":"S 08-44 W","Distance":79.67},
++            {"Bearing":"N 80-14 W","Distance":97.64},
++            {"Bearing":"N 06-47 E","Distance":80.78},
++            {"Bearing":"S 79-35 E","Distance":29.93},
++            {"Bearing":"S 79-40 E","Distance":49.71},
++        ])
++        # If a lot was selected in the grid, use its derived lines once
++        if "lines_override" in st.session_state and isinstance(st.session_state["lines_override"], pd.DataFrame):
++            default_lines = st.session_state.pop("lines_override")
++            default_lines = default_lines[["Bearing","Distance"]].copy()
++        else:
++            default_lines = _default_lines.copy()
++        lines_value = st.data_editor(
++            default_lines,
++            num_rows="dynamic",
++            use_container_width=True,
++            key="lines_tbl"
++        )
+@@
+-            # ---- NEW: derive lines from selected record & store for other tabs ----
+-            try:
+-                _, shapes_all = read_db(base)
+-                shp_sel = shapes_all[idx]
+-                if hasattr(shp_sel, "points"):
+-                    lon = np.array([p[0] for p in shp_sel.points], dtype=float)
+-                    lat = np.array([p[1] for p in shp_sel.points], dtype=float)
+-                else:
+-                    lon = np.array([p[0] for p in shp_sel], dtype=float)
+-                    lat = np.array([p[1] for p in shp_sel], dtype=float)
+-                rec_epsg = int(sel_row.get("SRC_EPSG", 4326)) if str(sel_row.get("SRC_EPSG","")).strip().isdigit() else 4326
+-                E_sel, N_sel, df_lines_sel = ring_to_lines(lon, lat, rec_epsg)
+-                st.session_state["SEL_POLY_E"] = E_sel
+-                st.session_state["SEL_POLY_N"] = N_sel
+-                st.session_state["SEL_EPSG"]   = rec_epsg
+-                st.session_state["SEL_LINES"]  = df_lines_sel
+-            except Exception as ex:
+-                st.warning(f"Could not derive lines from selected shape: {ex}")
+-                st.session_state.pop("SEL_POLY_E", None)
+-                st.session_state.pop("SEL_POLY_N", None)
+-                st.session_state.pop("SEL_EPSG", None)
+-                st.session_state.pop("SEL_LINES", None)
++            # ---- Derive lines from selected record, store for other tabs, and push into editor ----
++            try:
++                _, shapes_all = read_db(base)
++                shp_sel = shapes_all[idx]
++                # Shapefile geometry is WGS84 (lon/lat). Convert to projected to derive bearings.
++                if hasattr(shp_sel, "points"):
++                    lon = np.array([p[0] for p in shp_sel.points], dtype=float)
++                    lat = np.array([p[1] for p in shp_sel.points], dtype=float)
++                else:
++                    lon = np.array([p[0] for p in shp_sel], dtype=float)
++                    lat = np.array([p[1] for p in shp_sel], dtype=float)
++                rec_epsg = int(sel_row.get("SRC_EPSG", 4326)) if str(sel_row.get("SRC_EPSG","")).strip().isdigit() else 4326
++                E_sel, N_sel, df_lines_sel = ring_to_lines(lon, lat, rec_epsg)
++
++                # Expose to other tabs
++                st.session_state["SEL_POLY_E"] = E_sel
++                st.session_state["SEL_POLY_N"] = N_sel
++                st.session_state["SEL_EPSG"]   = rec_epsg
++                st.session_state["SEL_LINES"]  = df_lines_sel
++
++                # Push lines into the Lines editor (Bearing & Distance) — one-time override
++                if not df_lines_sel.empty:
++                    lines_override = df_lines_sel[["Bearing","Distance (m)"]].rename(columns={"Distance (m)":"Distance"}).copy()
++                    st.session_state["lines_override"] = lines_override
++                    # Also refresh tie point to first vertex (in the record's EPSG)
++                    if E_sel.size >= 1 and N_sel.size >= 1:
++                        st.session_state["tpE"] = float(E_sel[0])
++                        st.session_state["tpN"] = float(N_sel[0])
++                        inv = {v:k for k,v in ZONE_TO_EPSG.items()}
++                        st.session_state["zone"] = inv.get(rec_epsg, st.session_state.get("zone", DEFAULT_ZONE))
++            except Exception as ex:
++                st.warning(f"Could not derive lines from selected shape: {ex}")
++                for k in ("SEL_POLY_E","SEL_POLY_N","SEL_EPSG","SEL_LINES"):
++                    st.session_state.pop(k, None)
+@@
+-with tab_map:
+-    st.header("Map Viewer")
+-    base_map = st.selectbox("Basemap", ["OpenStreetMap","Google Satellite","Google Hybrid"], index=0)
+-    try:
+-        show_sel = False
+-        if "SEL_POLY_E" in st.session_state and st.session_state.get("SEL_POLY_E", np.array([])).size >= 3:
+-            show_sel = st.checkbox("Show SELECTED record from shapefile", value=True)
+-
+-        if show_sel:
+-            Emap = st.session_state["SEL_POLY_E"]
+-            Nmap = st.session_state["SEL_POLY_N"]
+-            epsg_map = st.session_state["SEL_EPSG"]
+-        else:
+-            Emap = E_closed
+-            Nmap = N_closed
+-            epsg_map = ZONE_TO_EPSG.get(st.session_state.get("zone", DEFAULT_ZONE), 0) or 3123
+-
+-        # Always displayed in WGS84 internally
+-        m = add_polygon_to_map(np.asarray(Emap), np.asarray(Nmap), epsg_map, base_map)
+-        st_folium(m, height=520, use_container_width=True)
+-    except Exception as e:
+-        st.error(f"Map error: {e}")
++with tab_map:
++    st.header("Map Viewer")
++    base_map = st.selectbox("Basemap", ["OpenStreetMap","Google Satellite","Google Hybrid"], index=0)
++
++    # Checkbox is always visible; it becomes enabled when a record is selected
++    sel_available = (
++        "SEL_POLY_E" in st.session_state and
++        isinstance(st.session_state["SEL_POLY_E"], np.ndarray) and
++        st.session_state["SEL_POLY_E"].size >= 3
++    )
++    show_sel = st.checkbox("Show SELECTED record from shapefile", value=sel_available, disabled=not sel_available)
++
++    try:
++        if show_sel and sel_available:
++            Emap = st.session_state["SEL_POLY_E"]
++            Nmap = st.session_state["SEL_POLY_N"]
++            epsg_map = st.session_state["SEL_EPSG"]
++        else:
++            Emap = E_closed
++            Nmap = N_closed
++            epsg_map = ZONE_TO_EPSG.get(st.session_state.get("zone", DEFAULT_ZONE), 3123)
++
++        # Map always renders in WGS84 internally
++        m = add_polygon_to_map(np.asarray(Emap), np.asarray(Nmap), epsg_map, base_map)
++        st_folium(m, height=520, use_container_width=True)
++    except Exception as e:
++        st.error(f"Map error: {e}")
+*** End Patch
