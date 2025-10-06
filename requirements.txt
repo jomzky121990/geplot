@@ -7,6 +7,5 @@ streamlit-folium
 reportlab
 ezdxf
 pyshp
-simplekml
 scipy
 matplotlib
